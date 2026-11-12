@@ -1,0 +1,4 @@
+numpy
+torch
+matplotlib
+gymnasium[box2d,mujoco]>=1.1
