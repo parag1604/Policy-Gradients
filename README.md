@@ -209,6 +209,6 @@ The learning rates are the repo defaults: 0.01 (CartPole) and 0.03 (InvertedPend
 
 ![PPO, REINFORCE and importance sampling on InvertedPendulum-v5](static/version12_InvertedPendulum-v5.png "version12, InvertedPendulum-v5")
 
-Next steps: bootstrapping the value function inside the advantage gives actor-critic methods (see the [Actor-Critic](https://github.com/parag1604/Actor-Critic) repository).
+Next steps: bootstrapping the value function inside the advantage gives actor-critic methods; see the [Actor-Critic Algorithms](https://parag1604.github.io/notes/Reinforcement-Learning/Actor-Critic-Algorithms) lecture.
 
 [^ppo]: Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). *Proximal Policy Optimization Algorithms*. [arXiv:1707.06347](https://arxiv.org/abs/1707.06347)
