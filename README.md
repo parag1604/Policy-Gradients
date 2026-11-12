@@ -1,6 +1,6 @@
 # Policy Gradients
 
-REINFORCE built up one idea at a time: from maximum likelihood to reward-to-go, baselines, learned value baselines, parallel environments, continuous actions and, finally, off-policy learning with importance sampling.
+REINFORCE built up one idea at a time: from maximum likelihood to reward-to-go, baselines, learned value baselines, parallel environments, continuous actions, off-policy learning with importance sampling and, finally, PPO.
 
 ---
 
@@ -19,7 +19,7 @@ pip install -r requirements.txt
 - `gymnasium>=1.1` is needed for the vector-environment API used in `version8.py` and `version10.py`.
 - `gymnasium[box2d]` (LunarLander, versions 7 and 8) needs `swig` to build (`brew install swig` on macOS).
 - `gymnasium[mujoco]` (InvertedPendulum and HalfCheetah, versions 9 and 10) installs MuJoCo.
-- Versions 1 to 6 and 11 only need CartPole, which ships with plain `gymnasium`.
+- Versions 1 to 6 and 11 only need CartPole (version12 uses CartPole and, optionally, InvertedPendulum), which ships with plain `gymnasium`.
 
 ## Data
 
@@ -155,4 +155,60 @@ New: a replay buffer. Every version so far throws a batch away after one gradien
 
 Changes from the original course code (`offpolicy_reinforce.py`), which this version is based on: the buffer used to be cut to its last 3000 transitions, which could chop off the start of the oldest episode, so whole episodes are now dropped; the trajectory and per-decision weights and clipping are new (the original had only the per-step ratio); ratios are computed in log space; and the code is ported from the old `gym` API to `gymnasium` (it also no longer calls `sys.exit()` when solved).
 
+### 12. Proximal Policy Optimization (`version12.py`)
+
+```bash
+python version12.py                                  # PPO on CartPole-v1, K = 10
+python version12.py --env-name InvertedPendulum-v5   # Gaussian policy (MuJoCo)
+python version12.py --epochs 5 --ent-coef 0.01       # fewer epochs, entropy bonus
+python version12.py --compare                        # the plots below (5 seeds per method)
+```
+
+New: PPO,[^ppo] the practical answer to what version11 showed. It keeps only the per-step ratio against the policy $\pi_{\text{old}}$ that collected the batch, $\rho_t(\theta) = \pi_\theta(a_t \mid s_t)/\pi_{\text{old}}(a_t \mid s_t)$ (version11's "first-order" approximation, see the [off-policy section of the lecture](https://parag1604.github.io/notes/Reinforcement-Learning/Policy-Gradients#off-policy-policy-gradients)), and makes it safe by not letting $\pi_\theta$ move far from $\pi_{\text{old}}$. Each batch is reused for $K$ epochs of minibatch steps on the clipped surrogate
+
+$$
+L(\theta) = \mathbb{E}_t\Big[\min\big(\rho_t(\theta)\,\hat A_t,\ \operatorname{clip}(\rho_t(\theta), 1-\epsilon, 1+\epsilon)\,\hat A_t\big)\Big], \qquad \epsilon = 0.2,
+$$
+
+plus a value-function loss (and, optionally, an entropy bonus). The advantages $\hat A_t$ come from a learned value function $V_\phi$ (as in version7) through GAE($\lambda$), $\hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l \delta_{t+l}$ with $\delta_t = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)$, $\lambda = 0.95$, normalised per batch. Every update prints two diagnostics: the **clip fraction** (share of samples whose ratio is outside $[1-\epsilon, 1+\epsilon]$ after the update) and the **approximate KL**, $\mathbb{E}[(\rho - 1) - \log\rho]$, between the collecting and the updated policy.
+
+**Clipping the objective is not clipping the weights.** The gradient of the unclipped term, $\rho_t \hat A_t \nabla\log\pi_\theta$, is the importance-weighted policy gradient. Version11's `--clip` capped the weight $\rho$, but the capped weight still multiplies $\nabla\log\pi_\theta$: every sample keeps pushing, by a biased amount, and nothing stops the policy from drifting further from the data. With a baseline, that bias collapsed 3 of 5 seeds. PPO's $\min$ instead makes the objective *flat* in $\theta$ for a sample once its ratio has moved past $1+\epsilon$ (if $\hat A_t > 0$) or below $1-\epsilon$ (if $\hat A_t < 0$). That sample's gradient is then exactly zero: a large ratio stops contributing instead of contributing the wrong amount. Moves in the harmful direction are never clipped, so $L$ is a pessimistic lower bound on the unclipped surrogate.
+
+**What we ran.** `python version12.py --compare` (and the same with `--env-name InvertedPendulum-v5`): 5 seeds per method, with the same seeds and the same number of new transitions per update for every method (1000 on CartPole-v1, 60 updates; 2000 on InvertedPendulum-v5, 40 updates), $\gamma = 0.99$. The methods are:
+
+- **REINFORCE + learned baseline**: version7's update, one gradient step per batch.
+- **Per-decision IS, K = 5**: version11's estimator, five full-batch gradient steps on each batch.
+- **PPO, K = 5 and K = 10**: $K$ epochs of 64-sample minibatches.
+
+The learning rates are the repo defaults: 0.01 (CartPole) and 0.03 (InvertedPendulum, as in version9) for the single-step methods, and $3\times10^{-4}$ for PPO. The runs were on the CPU of an Apple-silicon Mac, 1 to 4 minutes per seed, with the methods run in parallel. The return is the greedy policy's average over 5 episodes after every update. The KL and clip-fraction rows are the median over all updates and seeds, measured for every method against the policy that collected the batch.
+
+| CartPole-v1 | Steps to a return ≥ 475 (per seed) | Final return (per seed) | Mean of last 10 evaluations | KL per update | Clip fraction |
+|---|---|---|---|---|---|
+| REINFORCE + baseline | 17.9k, 16.7k, 30.8k, 26.2k, 24.2k | 500, 500, 500, 387, 500 | 461 | 0.001 | 0.00 |
+| per-decision IS, K = 5 | 8.7k, 10.7k, 6.1k, 17.1k, 5.3k | 258, 500, 500, 204, 500 | 379 | 0.032 | 0.32 |
+| PPO, K = 5 | 7.2k, 7.3k, 11.5k, 19.8k, 7.1k | 500 in every seed | 500 | 0.005 | 0.04 |
+| PPO, K = 10 | 3.1k, 14.9k, 10.5k, 12.5k, 3.0k | 500 in every seed | 500 | 0.008 | 0.09 |
+
+| InvertedPendulum-v5 | Steps to a return ≥ 950 (per seed) | Final return (per seed) | Mean of last 10 evaluations | KL per update | Clip fraction |
+|---|---|---|---|---|---|
+| REINFORCE + baseline | 62k, 36k, never, never, never | 45, 2, 84, 41, 68 | 172 | 0.23 | 0.63 |
+| per-decision IS, K = 5 | never in any seed | 4, 4, 4, 4, 18 | 5 | 140 | 1.00 |
+| PPO, K = 5 | 31k, 35k, 41k, 37k, 45k | 1000 in every seed | 1000 | 0.007 | 0.09 |
+| PPO, K = 10 | 29k, 29k, 39k, 38k, 31k | 1000 in every seed | 1000 | 0.009 | 0.12 |
+
+- **PPO trains better on both tasks.** It is as fast as the importance-sampling reuse on CartPole, about 3 to 20 thousand steps to a return of 475, and it is the only method that ends at the maximum return in all 5 seeds on both tasks. K = 10 was slightly faster than K = 5 in both cases.
+- **The KL row is the clipping at work.** PPO's policy moves by a KL of about 0.005 to 0.01 per update, and only 4 to 12% of the ratios end outside $[0.8, 1.2]$. Version11's estimator, given the same 5 steps on a batch, moves 4 to 6 times further on CartPole (KL 0.03, a third of the ratios outside the band). On InvertedPendulum with the larger learning rate it does not stop at all (KL in the hundreds): the Gaussian policy runs far away from the data, the weights degenerate, and the pendulum falls within 4 steps.
+- **The comparison is not perfectly even.** The single-step baselines use the repo's larger learning rates. A 3-seed check on InvertedPendulum with smaller ones:
+  - REINFORCE with lr 0.003 or 0.001 is stable (KL about 0.002), but it reaches only returns of about 35 to 140 in 80k steps.
+  - IS with lr 0.001 has a PPO-like KL (0.008) and reaches returns of about 85 to 150.
+  - IS with lr 0.003 reaches 910 in one seed, but then falls back.
+
+  None came close to PPO's 1000 in the same number of steps. PPO's advantage here also comes partly from GAE with a learned value function.
+
+![PPO, REINFORCE and importance sampling on CartPole-v1](static/version12_CartPole-v1.png "version12, CartPole-v1")
+
+![PPO, REINFORCE and importance sampling on InvertedPendulum-v5](static/version12_InvertedPendulum-v5.png "version12, InvertedPendulum-v5")
+
 Next steps: bootstrapping the value function inside the advantage gives actor-critic methods (see the [Actor-Critic](https://github.com/parag1604/Actor-Critic) repository).
+
+[^ppo]: Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). *Proximal Policy Optimization Algorithms*. [arXiv:1707.06347](https://arxiv.org/abs/1707.06347)
