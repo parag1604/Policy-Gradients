@@ -21,10 +21,6 @@ pip install -r requirements.txt
 - `gymnasium[mujoco]` (InvertedPendulum and HalfCheetah, versions 9 and 10) installs MuJoCo.
 - Versions 1 to 6 and 11 only need CartPole (version12 uses CartPole and, optionally, InvertedPendulum), which ships with plain `gymnasium`.
 
-## Data
-
-No dataset is needed. `version1.py` generates a synthetic two-class dataset, and every other version collects its own data by interacting with [Gymnasium](https://gymnasium.farama.org/) environments.
-
 ## Running
 
 Every script has `--help`, a `--max-iters` option for a quick run and a `--render` flag to watch the trained policy. The reward curve is saved to `plots/versionN.png` (the greedy policy's average return after every update) and the policy to `models/` (both git-ignored). The plots below are from the original runs.
